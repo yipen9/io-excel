@@ -66,3 +66,28 @@ fn main() {
     Record::write_excel("中文名称2.xlsx", "第二个中文名称", &record_list).unwrap();
 }
 ```
+
+## Write Excel Which Some Column Is None
+
+```rust
+use io_excel::IOExcel;
+#[derive(IOExcel, Debug)]
+pub struct Record {
+    #[column(name = "省份")]
+    pub province: String,
+
+    #[column(name = "城市")]
+    pub city: Option<String>,
+
+    #[column(name = "版本号")]
+    pub name: u32,
+}
+
+fn main() {
+    let record_list = Record::read_excel("中文名称.xlsx", "Sheet1").unwrap();
+    for record in &record_list {
+        eprintln!("{:#?}", record);
+    }
+    Record::write_excel("中文名称2.xlsx", "第二个中文名称", &record_list).unwrap();
+}
+```

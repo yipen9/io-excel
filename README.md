@@ -1,7 +1,7 @@
 # Cargo.toml 引入
 
 ```toml
-io-excel = "0.1.3"
+io-excel = "0.1.4"
 serde = { version = "1.0", features = ["derive"] }
 calamine = "0.26.1"
 rust_xlsxwriter = "0.79.0"

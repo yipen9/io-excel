@@ -75,8 +75,8 @@ fn parse_excel_io_stream(
     struct_fields: &StructFields,
 ) -> syn::Result<Vec<proc_macro2::TokenStream>> {
     let mut token_stream_list = Vec::new();
-    for (row, field) in struct_fields.iter().enumerate() {
-        let excel_field = get_io_excel_field(field, row)?;
+    for field in struct_fields {
+        let excel_field = get_io_excel_field(field)?;
         let ident = excel_field.ident;
         let ty = excel_field.ty;
         let column = excel_field.column_name.unwrap();
@@ -93,8 +93,8 @@ fn parse_from_excel_to_record_stream(
     struct_fields: &StructFields,
 ) -> syn::Result<Vec<proc_macro2::TokenStream>> {
     let mut token_stream_list = Vec::new();
-    for (row, field) in struct_fields.iter().enumerate() {
-        let excel_field = get_io_excel_field(field, row)?;
+    for field in struct_fields {
+        let excel_field = get_io_excel_field(field)?;
         let ident = excel_field.ident;
         let token = quote! {
             #ident:record.#ident
@@ -112,7 +112,7 @@ fn parse_write_fields_stream(
     let mut row_token_stream = proc_macro2::TokenStream::new();
 
     for (row, field) in struct_fields.iter().enumerate() {
-        let excel_field = get_io_excel_field(field, row)?;
+        let excel_field = get_io_excel_field(field)?;
         let ident = excel_field.ident;
         let header = excel_field.column_name.unwrap();
 
@@ -122,11 +122,19 @@ fn parse_write_fields_stream(
 
         header_token_stream.extend(header_token);
 
-        let row_token = quote! {
-            let val = format!("{}",record.#ident);
-            worksheet.write_string(row_idx as u32 + 1, #row as u16, &val)?;
-        };
-        row_token_stream.extend(row_token);
+        if excel_field.is_option {
+            let row_token = quote! {
+                let val_str = record.#ident.as_ref().map(|n| format!("{}", n)).unwrap_or_default();
+                worksheet.write_string(row_idx as u32 + 1, #row as u16, &val_str)?;
+            };
+            row_token_stream.extend(row_token);
+        } else {
+            let row_token = quote! {
+                let val = format!("{}",record.#ident);
+                worksheet.write_string(row_idx as u32 + 1, #row as u16, &val)?;
+            };
+            row_token_stream.extend(row_token);
+        }
     }
     let token_stream = quote! {
         #header_token_stream
@@ -163,47 +171,48 @@ fn get_struct_fields(st: &DeriveInput) -> syn::Result<&StructFields> {
     }
 }
 
-// fn get_inner_type_by_target(field: &Field, target: &str) -> Option<syn::Type> {
-//     if let Field {
-//         ty:
-//             syn::Type::Path(syn::TypePath {
-//                 path: syn::Path { ref segments, .. },
-//                 ..
-//             }),
-//         ..
-//     } = field
-//     {
-//         if let Some(syn::PathSegment { ref ident, .. }) = segments.first() {
-//             let ident_letial = ident.to_string();
-//             if ident_letial == target {
-//                 if let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
-//                     ref args,
-//                     ..
-//                 }) = segments.first().unwrap().arguments
-//                 {
-//                     if let Some(syn::GenericArgument::Type(ty)) = args.first() {
-//                         return Some(ty.clone());
-//                     }
-//                 }
-//             }
-//         }
-//     }
-//     None
-// }
+fn get_inner_type_by_target(field: &Field, target: &str) -> Option<syn::Type> {
+    if let Field {
+        ty:
+            syn::Type::Path(syn::TypePath {
+                path: syn::Path { ref segments, .. },
+                ..
+            }),
+        ..
+    } = field
+    {
+        if let Some(syn::PathSegment { ref ident, .. }) = segments.first() {
+            let ident_letial = ident.to_string();
+            if ident_letial == target {
+                if let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                    ref args,
+                    ..
+                }) = segments.first().unwrap().arguments
+                {
+                    if let Some(syn::GenericArgument::Type(ty)) = args.first() {
+                        return Some(ty.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
 
 struct IOExcelField {
-    index: usize,
     ident: Ident,
     ty: syn::Type,
     column_name: Option<String>,
+    is_option: bool,
 }
 
-fn get_io_excel_field(field: &Field, index: usize) -> syn::Result<IOExcelField> {
+fn get_io_excel_field(field: &Field) -> syn::Result<IOExcelField> {
     let ident = &field.ident;
     let ident_letial = &ident.as_ref().unwrap().to_string();
-    let excel_ident = Ident::new(&ident_letial, ident.span());
+    let excel_ident = Ident::new(ident_letial, ident.span());
     let type_ = field.ty.clone();
     let mut column_name = None;
+    let is_option = get_inner_type_by_target(field, "Option").is_some();
     for attr in &field.attrs {
         if let Ok(syn::Meta::List(list)) = attr.parse_meta() {
             if list.path.is_ident("column") {
@@ -213,10 +222,10 @@ fn get_io_excel_field(field: &Field, index: usize) -> syn::Result<IOExcelField> 
                             if let syn::Lit::Str(lit_str) = name_value.lit {
                                 column_name = Some(lit_str.value());
                                 return Ok(IOExcelField {
-                                    index,
                                     ident: excel_ident,
                                     ty: type_,
                                     column_name,
+                                    is_option,
                                 });
                             }
                         }
@@ -226,9 +235,9 @@ fn get_io_excel_field(field: &Field, index: usize) -> syn::Result<IOExcelField> 
         }
     }
     Ok(IOExcelField {
-        index,
         ident: excel_ident,
         ty: type_,
         column_name,
+        is_option,
     })
 }

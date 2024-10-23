@@ -24,6 +24,8 @@ fn do_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let from_fields = parse_from_excel_to_record_stream(struct_fields)?;
 
+    let write_token_stream = parse_write_fields_stream(struct_fields)?;
+
     let token_stream = quote! {
         use calamine::Reader;
         #[derive(Debug, serde::Deserialize)]
@@ -32,7 +34,7 @@ fn do_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         }
 
         impl #struct_ident {
-            pub fn excel(file_path: &str,sheet: &str,) -> std::result::Result<std::vec::Vec<#struct_ident>, std::boxed::Box<dyn std::error::Error>> {
+            pub fn read_excel(file_path: &str,sheet: &str) -> std::result::Result<std::vec::Vec<#struct_ident>, std::boxed::Box<dyn std::error::Error>> {
                 let mut workbook = calamine::open_workbook_auto(file_path)?;
 
                 let range = workbook.worksheet_range(sheet).unwrap();
@@ -46,6 +48,15 @@ fn do_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     result_list.push(record);
                 }
                 Ok(result_list)
+            }
+
+            pub fn write_excel(file_path: &str,sheet: &str,record_list:&[#struct_ident]) -> std::result::Result<(), std::boxed::Box<dyn std::error::Error>> {
+                let mut workbook = rust_xlsxwriter::Workbook::new();
+                let worksheet = workbook.add_worksheet();
+                worksheet.set_name(sheet)?;
+                #write_token_stream
+                workbook.save(file_path).unwrap();
+                Ok(())
             }
         }
 
@@ -91,6 +102,39 @@ fn parse_from_excel_to_record_stream(
         token_stream_list.push(token);
     }
     Ok(token_stream_list)
+}
+
+fn parse_write_fields_stream(
+    struct_fields: &StructFields,
+) -> syn::Result<proc_macro2::TokenStream> {
+    let mut header_token_stream = proc_macro2::TokenStream::new();
+
+    let mut row_token_stream = proc_macro2::TokenStream::new();
+
+    for (row, field) in struct_fields.iter().enumerate() {
+        let excel_field = get_io_excel_field(field, row)?;
+        let ident = excel_field.ident;
+        let header = excel_field.column_name.unwrap();
+
+        let header_token = quote! {
+            worksheet.write_string(0, #row as u16, #header)?;
+        };
+
+        header_token_stream.extend(header_token);
+
+        let row_token = quote! {
+            let val = format!("{}",record.#ident);
+            worksheet.write_string(row_idx as u32 + 1, #row as u16, &val)?;
+        };
+        row_token_stream.extend(row_token);
+    }
+    let token_stream = quote! {
+        #header_token_stream
+        for (row_idx, record) in record_list.iter().enumerate() {
+            #row_token_stream
+        }
+    };
+    Ok(token_stream)
 }
 
 fn get_excel_struct_ident(struct_ident: &Ident) -> syn::Ident {
@@ -145,10 +189,6 @@ fn get_struct_fields(st: &DeriveInput) -> syn::Result<&StructFields> {
 //         }
 //     }
 //     None
-// }
-
-// fn get_excel_struct_fields{
-
 // }
 
 struct IOExcelField {

@@ -1,6 +1,6 @@
 [package]
 name = "io-excel"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 email = "yipen9@gmail.com"
 repository = "https://github.com/yipen9/io-excel"
